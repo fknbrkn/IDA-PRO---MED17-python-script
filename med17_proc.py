@@ -73,6 +73,7 @@ def getValueFromDisasmLine(disasm_line):
 
 
   if ofs_ea != ida_idaapi.BADADDR:
+   ida_bytes.del_items(ofs_ea)   
    idc.create_data(ofs_ea, idc.FF_DWORD, 1, idc.BADADDR)
    target_ofs = ida_bytes.get_dword(ofs_ea)
    match = re.search(r'0x[DA8]0\w{6}', str(hex(target_ofs)))
@@ -113,6 +114,7 @@ def fillGlobalRegs():
    match = re.search(r'_([DA8]0\w{6})', disasm_line)
    if match:
     ofs = match.group(1)
+    ida_bytes.del_items(int(ofs,16))
     idc.create_data(int(ofs,16), idc.FF_WORD, 1, idc.BADADDR)
     
               	
@@ -292,14 +294,15 @@ def secondLayerLinks(reg, target_reg):
          count +=1
          
         #TODO!!!!
-        #if target_reg+',' in disasm_line or 'ret' in disasm_line:
-        # ofs = None
+        if target_reg+',' in disasm_line or 'ret' in disasm_line:
+            ofs = None
 
       if target_reg + ', ['+reg+'](' in disasm_line and ('ld32' in disasm_line or 'lea' in disasm_line): 
         #print(f'{disasm_line}')
         ofs = getValueFromDisasmLine(disasm_line)
         
         if not ofs: continue
+        ida_bytes.del_items(ofs)
         idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
 
         if not '0x8' in str(hex(ofs)) and not '0xa' in str(hex(ofs)) and not '0xd' in str(hex(ofs)): continue
@@ -311,12 +314,13 @@ def secondLayerLinks(reg, target_reg):
 def parse_characteristic_block(block) -> A2lMap:
     #print(block)
     lines = block.split('\n')
-    map = A2lMap(None,None, paramType=paramTypes.map)
+    map = A2lMap(None,None, paramType=paramTypes.map )
     try:
+    #if 1==1:
         for line in lines:
             if not line: continue
-            if line and not map.id: map.id = line.strip()
-            
+            if line and not map.id and not '"' in line: map.id = line.strip()
+            if 'DISPLAY_IDENTIFIER' in line: map.id = line.replace('DISPLAY_IDENTIFIER','').strip()
             if '"' in line and not map.comment: map.comment = line.lstrip()
             if map.offset and not map.info:
                 map.info = 8
@@ -325,6 +329,7 @@ def parse_characteristic_block(block) -> A2lMap:
             if '0x' in line and not map.offset: map.offset = int(line.strip(),16) 
     except:
         print(f'Error in parsing a2l block: {block}')
+        return None
     #print(map)    
     return map
 
@@ -410,6 +415,7 @@ def load_a2l():
             ida_enum.add_enum_member(e,'True',1)
             ida_enum.add_enum_member(e,'False',0)
             #measurements
+            #if 1==2:
             for line in file:
                 ignoreLine = False
                 #if cnt == 10: break
@@ -423,7 +429,8 @@ def load_a2l():
 
                         #if not var.offset or not var.id: continue
                         if var.info:
-                            if var.info == 8: idc.create_data(var.offset, idc.FF_BYTE, 1, idc.BADADDR)
+                            ida_bytes.del_items(var.offset)
+                            if var.info ==8: idc.create_data(var.offset, idc.FF_BYTE, 1, idc.BADADDR)
                             if var.info == 16: idc.create_data(var.offset, idc.FF_WORD, 1, idc.BADADDR)
                             if var.info == 32: idc.create_data(var.offset, idc.FF_DWORD, 1, idc.BADADDR)
                             
@@ -446,35 +453,39 @@ def load_a2l():
                     block = None
                 
                 elif block: block += line
-                
+        
+        with open(filename, 'r') as file:    
             print(f'{cnt} measurements find')
             cnt = 0
+            block = ''
             #return
             #characteristics
             for line in file:
                 ignoreLine = False                
                 #if cnt == 10: break
-                if '/begin AXIS' in line and block: ignoreLine = True
-                if '/end AXIS' in line and block: ignoreLine = False               
+                if '/begin AXIS' in line and not 'AXIS_PTS' in line and block: ignoreLine = True
+                if '/end AXIS' in line and not 'AXIS_PTS' in line and block: ignoreLine = False               
                 
-                if '/begin CHARACTERISTIC' in line:
+                if '/begin CHARACTERISTIC' in line or '/begin AXIS_PTS' in line:
                     cnt += 1
                     block = ' '
 
-                elif '/end CHARACTERISTIC' in line: 
+                elif '/end CHARACTERISTIC' in line or '/end AXIS_PTS' in line: 
                     if block: 
                         map = parse_characteristic_block(block)
                         #print(map)
                         try:
                             if map:
                                 map.id = map.id.replace('"','_')
-                                if map.offset and map.info:
-                                    if map.info == 8: idc.create_data(map.offset, idc.FF_BYTE, 1, idc.BADADDR)
-                                    if map.info == 16: idc.create_data(map.offset, idc.FF_WORD, 1, idc.BADADDR)
-                                    if map.info == 32: idc.create_data(map.offset, idc.FF_DWORD, 1, idc.BADADDR)
-                                else:
+                                #if map.offset and map.info:
+                                    #ida_bytes.del_items(map.offset)
+                                    #if map.info == 8: idc.create_data(map.offset, idc.FF_BYTE, 1, idc.BADADDR)
+                                    #if map.info == 16: idc.create_data(map.offset, idc.FF_WORD, 1, idc.BADADDR)
+                                    #if map.info == 32: idc.create_data(map.offset, idc.FF_DWORD, 1, idc.BADADDR)
+                                if map.offset and map.id: #else:
+                                    ida_bytes.del_items(map.offset)
                                     idc.create_data(map.offset, idc.FF_BYTE, 1, idc.BADADDR)                      
-                                idc.set_name(map.offset, map.id + '_map')
+                                    idc.set_name(map.offset, map.id + '_map')
                                 if map.comment: idc.set_cmt(map.offset, map.comment, 1)
                         except: print(f'Creating data failed: {map}')
                     block = None
@@ -523,10 +534,9 @@ def med17_main():
             secondLayerLinks(reg, 'a'+str(i))
             auto_wait()
         
-    
     load_a2l()
     print('Finished!')
         
 
-
+#load_a2l()
 med17_main()
