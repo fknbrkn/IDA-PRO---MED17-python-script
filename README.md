@@ -14,5 +14,5 @@ Idapython
 -parse em in code, converts to offset (based on prjs indirect() script)  
 -searching for a9 global register offset  
 -parse direct addressing mode (sometimes not)  
--handle double pointer offset // this part might be buggy (offset applies until target register assignment with some other value or 'rets') 
--loading a2l definition with maps and variables + bits
+-handle double pointer offset // this part might be buggy (offset applies until target register assignment with some other value or 'rets')  
+-loading a2l definition with maps and variables + bits  
