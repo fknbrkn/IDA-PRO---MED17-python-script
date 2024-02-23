@@ -18,6 +18,33 @@ import idautils
 
 regs = {'a0': 0,'a1': 0,'a8': 0,'a9': 0}
 
+class paramTypes(enumerate):
+    map = 'map'
+    measurement = 'measurement'
+    
+class A2lMap:
+    def __init__(self, offset: int, id: str, size = [0,0], comment = '', info = None, bit: int = -1, paramType = None):
+        self.offset = offset
+        self.id = id
+        self.size = size
+        self.comment = comment
+        self.info = info
+        self.bit = bit
+        self.paramType = paramType
+
+    def __str__(self):
+        return f"Offset: {hex(self.offset)}, Size: {self.size}, ID: {self.id}, Comment: {self.comment}, Info: {self.info}, type: {self.paramType}, bit: {self.bit}"
+
+def bitmaskToBit(bitmask: int):
+    if bitmask == 0x1: return 0
+    bitmask = int(bitmask,16)
+    if bitmask == 1: return 0
+    b = 0
+    while bitmask:
+        bitmask >>= 1
+        b += 1
+    if b == 0: return -1
+    return b - 1
     
 def getValueFromDisasmLine(disasm_line):
  ofs = 0
@@ -46,7 +73,7 @@ def getValueFromDisasmLine(disasm_line):
 
 
   if ofs_ea != ida_idaapi.BADADDR:
-   idc.create_data(ofs_ea, idc.FF_DWORD, 4, idc.BADADDR)
+   idc.create_data(ofs_ea, idc.FF_DWORD, 1, idc.BADADDR)
    target_ofs = ida_bytes.get_dword(ofs_ea)
    match = re.search(r'0x[DA8]0\w{6}', str(hex(target_ofs)))
    if match: 
@@ -86,7 +113,7 @@ def fillGlobalRegs():
    match = re.search(r'_([DA8]0\w{6})', disasm_line)
    if match:
     ofs = match.group(1)
-    idc.create_data(int(ofs,16), idc.FF_WORD, 4, idc.BADADDR)
+    idc.create_data(int(ofs,16), idc.FF_WORD, 1, idc.BADADDR)
     
               	
  
@@ -99,9 +126,7 @@ def fillGlobalRegs():
   for reg in regs:
    #if regs[reg] > 0: continue #avoiding duplicates
    if reg + ',' in disasm_line and reg + ',' in idc.GetDisasm(line+2):
-    #found line with global regs assignment!
     if '@HIS' in disasm_line: #defined
-     #print(f'{hex(line)}: {reg} {disasm_line}') 
      segChar = (str('0x{:02x}'.format(idc.get_wide_byte(line+3))[-1]))
      regex  = segChar + '\w{7}\)'
      match = re.search(regex, disasm_line, re.IGNORECASE)
@@ -198,16 +223,13 @@ def find_a9():
 
   if ida_ua.ua_mnem(line-2) == 'mov16' and ida_ua.ua_mnem(line+4) == 'st32.w' and ida_ua.ua_mnem(line+8) == 'st16.w' and ida_ua.ua_mnem(line+10) == 'st16.w':
       print(f'[{hex(line)}] Method #1: found probably a9 link in: {disasm_line}') 
-      res = (getValueFromDisasmLine(disasm_line))
+      a9 = (getValueFromDisasmLine(disasm_line))
       if a9:
           print(f'[{hex(line)}] +Found a9 offset: {hex(a9)}')
           results.append(a9)
       else:
           print(f'No luck!')
-    
-
-
-  
+   
   # 2 method
   # sha32           d0, d2, #2
 
@@ -251,7 +273,7 @@ def find_a9():
     
 def secondLayerLinks(reg, target_reg):
     
-    print(f'Proceed with {reg} codeflow offsets, target: [{target_reg}]')
+    print(f'Proceed with {reg} indirect offsets, target: [{target_reg}]')
     ofs = None
     count = 0
     for line in idautils.Heads():
@@ -263,29 +285,210 @@ def secondLayerLinks(reg, target_reg):
          #finally magic is here
          ida_bytes.del_items(ofs)
          if '16' in str(ida_ua.ua_mnem):
-          idc.create_data(ofs, idc.FF_WORD, 4, idc.BADADDR)
+          idc.create_data(ofs, idc.FF_WORD, 1, idc.BADADDR)
          else:
-          idc.create_data(ofs, idc.FF_DWORD, 4, idc.BADADDR)
+          idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
          ida_offset.op_offset(line, 1, idc.REF_OFF32, -1, (ofs), 0x0)
          count +=1
          
-        
-        if target_reg+',' in disasm_line or 'ret' in disasm_line:
-         ofs = None
+        #TODO!!!!
+        #if target_reg+',' in disasm_line or 'ret' in disasm_line:
+        # ofs = None
 
       if target_reg + ', ['+reg+'](' in disasm_line and ('ld32' in disasm_line or 'lea' in disasm_line): 
         #print(f'{disasm_line}')
         ofs = getValueFromDisasmLine(disasm_line)
         
         if not ofs: continue
-        idc.create_data(ofs, idc.FF_DWORD, 4, idc.BADADDR)
+        idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
 
         if not '0x8' in str(hex(ofs)) and not '0xa' in str(hex(ofs)) and not '0xd' in str(hex(ofs)): continue
         if len(str(hex(ofs))) != 10: continue
         #if not target_reg: target_reg = print_operand(line,0)
     
     print(f'Done... {str(count)} entries replaced')
-   
+ 
+def parse_characteristic_block(block) -> A2lMap:
+    #print(block)
+    lines = block.split('\n')
+    map = A2lMap(None,None, paramType=paramTypes.map)
+    try:
+        for line in lines:
+            if not line: continue
+            if line and not map.id: map.id = line.strip()
+            
+            if '"' in line and not map.comment: map.comment = line.lstrip()
+            if map.offset and not map.info:
+                map.info = 8
+                if '32' in line or 'DWORD' in line: map.info = 32
+                if '16' in line or 'WORD' in line: map.info = 16
+            if '0x' in line and not map.offset: map.offset = int(line.strip(),16) 
+    except:
+        print(f'Error in parsing a2l block: {block}')
+    #print(map)    
+    return map
+
+def parse_measurement_block(block) -> A2lMap:
+    #print(block)
+    lines = block.split('\n')
+    map = A2lMap(None,None, paramType=paramTypes.measurement)
+    try:
+    
+        for line in lines:
+            if not line: continue
+            if line and not map.id: map.id = line.strip()
+            if '"' in line and not map.comment: map.comment = line.lstrip()
+            if 'UBYTE' in line or 'SBYTE' in line: map.info = 8
+            if 'UWORD' in line or 'SWORD' in line: map.info = 16
+            if 'ECU_ADDRESS' in line and not map.offset: map.offset = int(line.replace('ECU_ADDRESS','').strip(),16) 
+            if 'DISPLAY_IDENTIFIER' in line: map.id = line.replace('DISPLAY_IDENTIFIER','').strip()
+            if 'BIT_MASK' in line: 
+                bit = bitmaskToBit(line.replace('BIT_MASK','').strip())
+                if bit >= 0:
+                    map.bit = bit
+                else:
+                    print(f'Failed to parse bitmask >{line.replace("BIT_MASK","").strip()}<' ) 
+    except:
+        print(f'Error in parsing a2l block: {block}')   
+    return map
+ 
+def assign_enums():
+    #direct
+    print('Assign enums... direct')
+    for line in idautils.Heads():
+      disasm_line = idc.GetDisasm(line)
+      #if line < 0x80096418 or line > 0x80096500: continue #################################
+      if idc.get_wide_byte(line) == 0x6F or idc.get_wide_byte(line) == 0xD5:
+          if ':' in disasm_line:
+              if idc.get_wide_byte(line) == 0xD5: opnum = 0 
+              else: opnum = 1
+              enm_id = get_enum('enm_'+ str(hex(get_operand_value(line,opnum))))
+              if enm_id == 18446744073709551615 or enm_id == 0xffffffffffffffff: continue
+              op_enum(line,1,enm_id,0)
+    #indirect
+    print('Assign enums... indirect')
+    op = None
+    enm_id = None
+    for line in idautils.Heads():
+        disasm_line = idc.GetDisasm(line)
+        if not disasm_line: continue
+        if op and enm_id:
+           if op+',' in disasm_line: 
+               op = None 
+               enm_id = None
+               
+        if op and enm_id:
+            if op+':' in disasm_line:
+               op_enum(line,1,(enm_id),0) 
+        
+        if idc.get_wide_byte(line) == 0x05: #ld
+          enm_id = get_enum('enm_'+ str(hex(get_operand_value(line,1))))
+          if enm_id == 0xffffffffffffffff or enm_id == 18446744073709551615:
+             enm_id = None
+          else: op = str(print_operand(line,0))
+        
+    
+          
+          
+     
+ 
+def load_a2l():
+    
+    if not ida_kernwin.ask_yn(1,"Load a2l file?","Do you want to load a2l file?"): return
+    
+    
+    filename = ida_kernwin.ask_file(False, "*.a2l", "Select a2l file")
+
+    if filename:
+
+        
+        with open(filename, 'r') as file:
+            print(f'Trying to parse a2l file {filename}')
+            cnt = 0
+            block = ''
+            e = add_enum(1, 'Condition',0)
+            ida_enum.add_enum_member(e,'True',1)
+            ida_enum.add_enum_member(e,'False',0)
+            #measurements
+            for line in file:
+                ignoreLine = False
+                #if cnt == 10: break
+                if '/begin MEASUREMENT' in line: 
+                    cnt += 1
+                    block = ' '
+                
+                elif '/end MEASUREMENT' in line:
+                    if block:
+                        var = parse_measurement_block(block)
+
+                        #if not var.offset or not var.id: continue
+                        if var.info:
+                            if var.info == 8: idc.create_data(var.offset, idc.FF_BYTE, 1, idc.BADADDR)
+                            if var.info == 16: idc.create_data(var.offset, idc.FF_WORD, 1, idc.BADADDR)
+                            if var.info == 32: idc.create_data(var.offset, idc.FF_DWORD, 1, idc.BADADDR)
+                            
+                        if var.bit >= 0:
+                            #print(var)
+                            idc.set_name(var.offset, '') #unset name
+                            enm = get_enum('enm_' + str(hex(var.offset)))
+                            if enm == 18446744073709551615 or not enm: enm = add_enum(-1, 'enm_' + str(hex(var.offset)),1)
+                            ida_enum.add_enum_member(enm,var.id,var.bit)
+                            enmm = get_enum_member_by_name(var.id)
+                            ida_enum.set_enum_member_cmt(enmm,var.comment,1)
+                            
+                            
+                        else: 
+                            idc.set_name(var.offset, var.id)
+                            idc.set_cmt(var.offset, var.comment,1)
+             
+                                                   
+                        
+                    block = None
+                
+                elif block: block += line
+                
+            print(f'{cnt} measurements find')
+            cnt = 0
+            #return
+            #characteristics
+            for line in file:
+                ignoreLine = False                
+                #if cnt == 10: break
+                if '/begin AXIS' in line and block: ignoreLine = True
+                if '/end AXIS' in line and block: ignoreLine = False               
+                
+                if '/begin CHARACTERISTIC' in line:
+                    cnt += 1
+                    block = ' '
+
+                elif '/end CHARACTERISTIC' in line: 
+                    if block: 
+                        map = parse_characteristic_block(block)
+                        #print(map)
+                        try:
+                            if map:
+                                map.id = map.id.replace('"','_')
+                                if map.offset and map.info:
+                                    if map.info == 8: idc.create_data(map.offset, idc.FF_BYTE, 1, idc.BADADDR)
+                                    if map.info == 16: idc.create_data(map.offset, idc.FF_WORD, 1, idc.BADADDR)
+                                    if map.info == 32: idc.create_data(map.offset, idc.FF_DWORD, 1, idc.BADADDR)
+                                else:
+                                    idc.create_data(map.offset, idc.FF_BYTE, 1, idc.BADADDR)                      
+                                idc.set_name(map.offset, map.id + '_map')
+                                if map.comment: idc.set_cmt(map.offset, map.comment, 1)
+                        except: print(f'Creating data failed: {map}')
+                    block = None
+        
+                elif block and not ignoreLine: block += line
+                
+            print(f'{cnt} characteristics found')
+            
+            #measurements
+            
+            assign_enums()
+    
+    
+       
 def med17_main():
    
     auto_wait()
@@ -321,10 +524,9 @@ def med17_main():
             auto_wait()
         
     
+    load_a2l()
     print('Finished!')
         
-    #load a2l file
-    #q = ida_kernwin.ask_yn("Load a2l file","Do you want to load a2l file?")
-    #if q == 1: pass
+
 
 med17_main()
