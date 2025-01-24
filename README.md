@@ -8,6 +8,7 @@ Idapython
   -load bin with start address, loading address = 0x80000000, choose tricore cpu  
   -make autoanalyse of pflash segment to get raw code  
   -file -> script file  
+  -choose a9 register from list of results. keep in mind that its usually flash (0x80000000 based) pointer
 
 <b>Whats inside:</b>
 -searching for global registers values (simply assignment)  
