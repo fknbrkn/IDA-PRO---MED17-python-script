@@ -46,10 +46,12 @@ def bitmaskToBit(bitmask: int):
     if b == 0: return -1
     return b - 1
     
-def getValueFromDisasmLine(disasm_line):
+def getValueFromDisasmLine(disasm_line, prefix = ''):
  ofs = 0
  ofs2 = 0
- match = re.search(r'\(\w*[DA8]0\w{6}', disasm_line)
+ regx = re.escape(prefix) + r'\w*[DA8]0\w{6}'
+ #print(regx)
+ match = re.search(regx, disasm_line)
 
  if match:
   match = re.search(r'[DA8]0\w{6}', disasm_line) #main offset
@@ -58,6 +60,7 @@ def getValueFromDisasmLine(disasm_line):
   
   #additive
   #print(f'{match}  {matchN} {matchH}')
+
   if matchN:
    ofs2 = (matchN.group(0))[1:]
    ofs2 = int(ofs2)
@@ -70,6 +73,7 @@ def getValueFromDisasmLine(disasm_line):
   ofs = match.group(0)
   ofs = int(ofs,16)
   ofs_ea = ofs+int(ofs2)
+
 
 
   if ofs_ea != ida_idaapi.BADADDR:
@@ -216,39 +220,69 @@ def find_a9():
  a9 = None
  results = []
  for line in idautils.Heads():
-  #if line < 0x8011a000 or line > 0x8011a0ff: continue
+  #if line < 0x8014E1A4 or line > 0x8014E4A4: continue
   disasm_line = idc.GetDisasm(line) 
-  if not 'ld32' in disasm_line or not '[a1]' in disasm_line: continue
-  # 1 method
+  if not 'ld' in disasm_line and (not '[a1]' in disasm_line or not '[a15]' in disasm_line): continue
+  # method 1
   # mov16 d15, #0
   # 
 
-  if ida_ua.ua_mnem(line-2) == 'mov16' and ida_ua.ua_mnem(line+4) == 'st32.w' and ida_ua.ua_mnem(line+8) == 'st16.w' and ida_ua.ua_mnem(line+10) == 'st16.w':
+  if '[a1]' in disasm_line and ida_ua.ua_mnem(line-2) == 'mov16' and ida_ua.ua_mnem(line+4) == 'st32.w' and ida_ua.ua_mnem(line+8) == 'st16.w' and ida_ua.ua_mnem(line+10) == 'st16.w':
       print(f'[{hex(line)}] Method #1: found probably a9 link in: {disasm_line}') 
       a9 = (getValueFromDisasmLine(disasm_line))
       if a9:
-          print(f'[{hex(line)}] +Found a9 offset: {hex(a9)}')
+          print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
           results.append(a9)
       else:
           print(f'No luck!')
    
-  # 2 method
+  # method 2
   # sha32           d0, d2, #2
 
-  if 'sha32' in idc.GetDisasm(line-4) and '#2' in idc.GetDisasm(line-4) and 'addsc' in idc.GetDisasm(line+4) and '#0' in idc.GetDisasm(line+4):
+  if '[a1]' in disasm_line and 'sha32' in idc.GetDisasm(line-4) and '#2' in idc.GetDisasm(line-4) and 'addsc' in idc.GetDisasm(line+4) and '#0' in idc.GetDisasm(line+4):
       print(f'[{hex(line)}] Method #2: found probably a9 link in: {disasm_line}')
       a9 = (getValueFromDisasmLine(disasm_line))
       if a9:
-          print(f'[{hex(line)}] +Found a9 offset: {hex(a9)}')
+          print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
           results.append(a9)
           #continue 
       else:
           print(f'No luck!')
- 
+
+#method 3
+
+  if '[a15]' in disasm_line and 'nop16' in idc.GetDisasm(line-2) and 'ld16' in idc.GetDisasm(line-4) and ('sub16' in idc.GetDisasm(line+2) or 'insert' in idc.GetDisasm(line+2)) and 'd15' in idc.GetDisasm(line+2) and '_80' in idc.GetDisasm(line) :
+      
+      print(f'[{hex(line)}] Method #3: found probably a9 link in: {disasm_line}')
+      a9 = (getValueFromDisasmLine(disasm_line))
+      match = re.search(r'[DA8]0\w{6}', disasm_line)
+      if match: 
+        a9 = int(match.group(0),16)
+        print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
+        results.append(a9)
+        #continue 
+      else:
+        print(f'No luck!')
+        
+  if '[a15]' in disasm_line  and '[a15]' in idc.GetDisasm(line+4) and 'mov16' in idc.GetDisasm(line-6) and 'ret' in idc.GetDisasm(line-8) :
+      
+      print(f'[{hex(line)}] Method #4: found probably a9 link in: {disasm_line}')
+      a9 = (getValueFromDisasmLine(disasm_line))
+      match = re.search(r'[DA8]0\w{6}', disasm_line)
+      if match: 
+        a9 = int(match.group(0),16)
+        print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
+        results.append(a9)
+        #continue 
+      else:
+        print(f'No luck!')
+
+
+
  a9 = None
- if len(results) == 0:
-    print('No results found for a9 register, BYE!')
-    return None
+ #if len(results) == 0:
+    #print('No results found for a9 register, BYE!')
+    #return None
  #checking results for different values
  resultsCount = {}
  for i in set(results):
@@ -257,10 +291,13 @@ def find_a9():
  if len(resultsCount) == 1: #no different offsets, all ok
   a9 = results[0]
  else:
-  x = 'Multiple offsets has been found! \n Enter preferred a9 value with format 0x80123456 \n Results: \n'
+  x = 'Multiple / no offsets has been found! \n Enter preferred a9 value with format 0x80123456 \n Results: \n'
   x += ''.join('['+hex(i)+']\n' for i in results)
   print(results)
-  q = ida_kernwin.ask_text(10,str(hex(results[0])),x)
+  if len(results) > 0: 
+    q = ida_kernwin.ask_text(10,str(hex(results[0])),x)
+  else:
+    q = ida_kernwin.ask_text(10,str(0x80123456),'Type a9 value here (usually its offset of a first element in stack of 0x800xxxxx) \n try to search for "debug16" text')   
   if not q: return None
   if '0x80' in q and len(q) == 10:
    try:
@@ -272,7 +309,8 @@ def find_a9():
     
  print(f'Register a9 defined as {hex(a9)}')
  return a9 
-    
+
+ 
 def secondLayerLinks(reg, target_reg):
     
     print(f'Proceed with {reg} indirect offsets, target: [{target_reg}]')
@@ -299,7 +337,7 @@ def secondLayerLinks(reg, target_reg):
 
       if target_reg + ', ['+reg+'](' in disasm_line and ('ld32' in disasm_line or 'lea' in disasm_line): 
         #print(f'{disasm_line}')
-        ofs = getValueFromDisasmLine(disasm_line)
+        ofs = getValueFromDisasmLine(disasm_line,'(')
         
         if not ofs: continue
         ida_bytes.del_items(ofs)
@@ -539,4 +577,5 @@ def med17_main():
         
 
 #load_a2l()
+#find_a9()
 med17_main()
