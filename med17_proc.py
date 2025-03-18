@@ -2,6 +2,9 @@
 #fknbrkn 2024
 
 
+#from cgi import test
+from ast import IsNot
+from enum import auto
 import ida_kernwin
 import math
 import ida_funcs
@@ -17,6 +20,7 @@ import re
 import idautils
 
 regs = {'a0': 0,'a1': 0,'a8': 0,'a9': 0}
+regs_all = {'a2':0, 'a3':0, "a4":0, "a5":0, "a6":0, "a7":0, "a10":0, "a11":0, "a12":0, "a13":0, "a14":0, "a15":0 }
 
 class paramTypes(enumerate):
     map = 'map'
@@ -47,43 +51,43 @@ def bitmaskToBit(bitmask: int):
     return b - 1
     
 def getValueFromDisasmLine(disasm_line, prefix = ''):
- ofs = 0
- ofs2 = 0
- regx = re.escape(prefix) + r'\w*[DA8]0\w{6}'
- #print(regx)
- match = re.search(regx, disasm_line)
+     ofs = 0
+     ofs2 = 0
+     regx = re.escape(prefix) + r'\w*[ABCD8]0\w{6}'
+     #print(regx)
+     match = re.search(regx, disasm_line)
 
- if match:
-  match = re.search(r'[DA8]0\w{6}', disasm_line) #main offset
-  matchN = re.search(r'\+\d{1,4}',disasm_line) #additive part numeric
-  matchH = re.search(r'\+0x\w{1,4}', disasm_line) #additive part hex
+     if match:
+      match = re.search(r'[ABCD8]0\w{6}', disasm_line) #main offset
+      matchN = re.search(r'\+\d{1,4}',disasm_line) #additive part numeric
+      matchH = re.search(r'\+0x\w{1,4}', disasm_line) #additive part hex
   
-  #additive
-  #print(f'{match}  {matchN} {matchH}')
+      #additive
+      #print(f'{match}  {matchN} {matchH}')
 
-  if matchN:
-   ofs2 = (matchN.group(0))[1:]
-   ofs2 = int(ofs2)
-  if matchH:
-   ofs2 = (matchH.group(0))
-   if '+' in ofs2: ofs2 = int(ofs2[1:],16) #remove + symbol
-
-
-  #main offset
-  ofs = match.group(0)
-  ofs = int(ofs,16)
-  ofs_ea = ofs+int(ofs2)
+      if matchN:
+       ofs2 = (matchN.group(0))[1:]
+       ofs2 = int(ofs2)
+      if matchH:
+       ofs2 = (matchH.group(0))
+       if '+' in ofs2: ofs2 = int(ofs2[1:],16) #remove + symbol
 
 
+      #main offset
+      ofs = match.group(0)
+      ofs = int(ofs,16)
+      ofs_ea = ofs+int(ofs2)
 
-  if ofs_ea != ida_idaapi.BADADDR:
-   ida_bytes.del_items(ofs_ea)   
-   idc.create_data(ofs_ea, idc.FF_DWORD, 1, idc.BADADDR)
-   target_ofs = ida_bytes.get_dword(ofs_ea)
-   match = re.search(r'0x[DA8]0\w{6}', str(hex(target_ofs)))
-   if match: 
-    #print(f' res: {hex(ofs)} {ofs2} {match}')
-    return int(match.group(0),16)
+
+
+      if ofs_ea != ida_idaapi.BADADDR:
+       ida_bytes.del_items(ofs_ea)   
+       idc.create_data(ofs_ea, idc.FF_DWORD, 1, idc.BADADDR)
+       target_ofs = ida_bytes.get_dword(ofs_ea)
+       match = re.search(r'0x[ABCD8]0\w{6}', str(hex(target_ofs)))
+       if match: 
+        #print(f' res: {hex(ofs)} {ofs2} {match}')
+        return int(match.group(0),16)
     
     
 
@@ -105,56 +109,58 @@ def processrom(min = None, max = None):
             curaddr = ida_search.find_unknown(curaddr, idc.SEARCH_DOWN)
     return
 
+
+
 def fillGlobalRegs():
 
- global regs
+     global regs
  
- print(f'Searching for global registers...')
+     print(f'Searching for global registers...')
 
- for line in idautils.Heads():
-  disasm_line = idc.GetDisasm(line)
-  if ('#@HIS' in disasm_line or '#@LOS' in disasm_line):
-   #print(disasm_line)
-   match = re.search(r'_([DA8]0\w{6})', disasm_line)
-   if match:
-    ofs = match.group(1)
-    ida_bytes.del_items(int(ofs,16))
-    idc.create_data(int(ofs,16), idc.FF_WORD, 1, idc.BADADDR)
+     for line in idautils.Heads():
+      disasm_line = idc.GetDisasm(line)
+      if ('#@HIS' in disasm_line or '#@LOS' in disasm_line):
+       #print(disasm_line)
+       match = re.search(r'_([ABCD8]0\w{6})', disasm_line)
+       if match:
+        ofs = match.group(1)
+        ida_bytes.del_items(int(ofs,16))
+        idc.create_data(int(ofs,16), idc.FF_WORD, 1, idc.BADADDR)
     
               	
  
- for line in idautils.Heads():
-  disasm_line = idc.GetDisasm(line)
-  #if line < 0x801063BA or line > 0x80107000: continue
-  if idc.get_wide_byte(line) != 0x91: continue #movh.a
+     for line in idautils.Heads():
+      disasm_line = idc.GetDisasm(line)
+      #if line < 0x801063BA or line > 0x80107000: continue
+      if idc.get_wide_byte(line) != 0x91: continue #movh.a
 
 
-  for reg in regs:
-   #if regs[reg] > 0: continue #avoiding duplicates
-   if reg + ',' in disasm_line and reg + ',' in idc.GetDisasm(line+2):
-    if '@HIS' in disasm_line: #defined
-     segChar = (str('0x{:02x}'.format(idc.get_wide_byte(line+3))[-1]))
-     regex  = segChar + '\w{7}\)'
-     match = re.search(regex, disasm_line, re.IGNORECASE)
-     if match:
-      regs[reg] = (int('0x' + match.group(0)[:-1],16))
-      print(f'[{hex(line)}] Register {reg} found with value {hex(regs[reg])}')
-      #continue
+      for reg in regs:
+       #if regs[reg] > 0: continue #avoiding duplicates
+       if reg + ',' in disasm_line and reg + ',' in idc.GetDisasm(line+2):
+        if '@HIS' in disasm_line: #defined
+         segChar = (str('0x{:02x}'.format(idc.get_wide_byte(line+3))[-1]))
+         regex  = segChar + '\w{7}\)'
+         match = re.search(regex, disasm_line, re.IGNORECASE)
+         if match:
+          regs[reg] = (int('0x' + match.group(0)[:-1],16))
+          print(f'[{hex(line)}] Register {reg} found with value {hex(regs[reg])}')
+          #continue
       
-    if '#0x' in disasm_line  and '0x' in idc.GetDisasm(line+4): #not defined
-     matchHIS = re.search(r'0x\w{4}', disasm_line)
-     matchLOS = re.search(r'-*0x\w{4}', idc.GetDisasm(line+4))
-     if matchHIS and matchLOS:
+        if '#0x' in disasm_line  and '0x' in idc.GetDisasm(line+4): #not defined
+         matchHIS = re.search(r'0x\w{4}', disasm_line)
+         matchLOS = re.search(r'-*0x\w{4}', idc.GetDisasm(line+4))
+         if matchHIS and matchLOS:
       
-      res = matchHIS.group(0)
-      res = int(res,16) << 16 #HIS
+          res = matchHIS.group(0)
+          res = int(res,16) << 16 #HIS
      
-      res += int(matchLOS.group(0),16)
-      regs[reg] = (res)
-      print(f'[{hex(line)}] Register {reg} found with value {hex(regs[reg])}')
+          res += int(matchLOS.group(0),16)
+          regs[reg] = (res)
+          print(f'[{hex(line)}] Register {reg} found with value {hex(regs[reg])}')
       
- #print(f'Results: {regs}')
- print('Done! ***In case of duplicated results, last one were stored. Use > indirect("a0", 0x80123456) < to override if necessary')
+     #print(f'Results: {regs}')
+     print('Done! ***In case of duplicated results, last one were stored. Use > indirect("a0", 0x80123456) < to override if necessary')
 
 
 def reg_ofs(disasm_line, startPattern) -> int:
@@ -179,7 +185,7 @@ def directLinks():
         #if line < 0x800df914 or line > 0x800df920: continue
         disasm_line = idc.GetDisasm(line)
         disasm_line4 = idc.GetDisasm(line+4)
-        if 'movh.a' in disasm_line and (', #0x80' in disasm_line or ', #0xA0' in disasm_line or ', #0xD0' in disasm_line) and not '@HIS' in disasm_line:
+        if 'movh.a' in disasm_line and (', #0x80' in disasm_line or ', #0xA0' in disasm_line or ', #0xB0' in disasm_line or ', #0xC0' in disasm_line or ', #0xD0' in disasm_line) and not '@HIS' in disasm_line:
             
             reg = print_operand(line,0)
             if not reg: continue
@@ -255,7 +261,7 @@ def find_a9():
       
       print(f'[{hex(line)}] Method #3: found probably a9 link in: {disasm_line}')
       a9 = (getValueFromDisasmLine(disasm_line))
-      match = re.search(r'[DA8]0\w{6}', disasm_line)
+      match = re.search(r'[ABCD8]0\w{6}', disasm_line)
       if match: 
         a9 = int(match.group(0),16)
         print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
@@ -268,7 +274,7 @@ def find_a9():
       
       print(f'[{hex(line)}] Method #4: found probably a9 link in: {disasm_line}')
       a9 = (getValueFromDisasmLine(disasm_line))
-      match = re.search(r'[DA8]0\w{6}', disasm_line)
+      match = re.search(r'[ABCD8]0\w{6}', disasm_line)
       if match: 
         a9 = int(match.group(0),16)
         print(f'[{hex(line)}] + Found a9 offset: {hex(a9)}')
@@ -335,13 +341,15 @@ def secondLayerLinks(reg, target_reg):
         if target_reg+',' in disasm_line or 'ret' in disasm_line:
             ofs = None
 
-      if target_reg + ', ['+reg+'](' in disasm_line and ('ld32' in disasm_line or 'lea' in disasm_line): 
+      if target_reg + ', ['+reg+'](' in disasm_line and ('ld32.a' in disasm_line ): #or 'lea' in disasm_line): 
         #print(f'{disasm_line}')
         ofs = getValueFromDisasmLine(disasm_line,'(')
         
         if not ofs: continue
-        ida_bytes.del_items(ofs)
-        idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
+        #ida_bytes.del_items(ofs)
+        #idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
+        idc.create_data(int(ofs,16), idc.FF_DWORD, 4, idc.BADADDR)
+        idc.op_plain_offset(int(ofs,16), 0, 0) 
 
         if not '0x8' in str(hex(ofs)) and not '0xa' in str(hex(ofs)) and not '0xd' in str(hex(ofs)): continue
         if len(str(hex(ofs))) != 10: continue
@@ -536,15 +544,61 @@ def load_a2l():
             
             assign_enums()
     
+def pointers():
+    #ld32.a          a15, [a9](unk_8019E3BC - unk_8019E234)
+   
+  for line in idautils.Heads():
+    #if line < 0x8008403C or line > 0x80084050: continue #################################
+    disasm_line = idc.GetDisasm(line)
+    if ('ld32.a' in disasm_line):
+        match = re.search(r'_([ABCD8]0\w{6})', disasm_line)
+        if match:
+            ofs = match.group(1)
+            idc.create_data(int(ofs,16), idc.FF_DWORD, 4, idc.BADADDR)
+            idc.op_plain_offset(int(ofs,16), 0, 0) 
+            
+def anotherDirectAddressingRoutine():
+   print("Searching for registers offsets, another method")
+   for reg in range(1,16): #regs
+    count = 0
+    if reg in {0,1,8,9}: continue
+    regValue = None
+    for line in idautils.Heads():
+        #if line < 0x80320000 or line > 0x80320150: continue #################################
+        disasm_line = idc.GetDisasm(line)
+        if 'a'+str(reg)+',' in disasm_line and '#0x' in disasm_line and "movh.a" in disasm_line:
+            match = re.search(r"0x[A-D8]000", disasm_line)
+            if match: 
+               regValue = match.group(0)
+               continue
+        if 'a'+str(reg)+'' in disasm_line and "[" in disasm_line and "0x" in disasm_line and regValue != None and ("lea" in disasm_line or "ld32" in disasm_line):
+            match = re.search(r'-*0x\w{4}', disasm_line)
+            if match:
+               res = int(regValue,16) << 16
+               #res += int(match.group(0),16)
+              # print(f'{hex(line)} Offset found: {hex(res+int(match.group(0),16)}')
+               ida_offset.op_offset(line, 1, idc.REF_OFF32, -1, res, 0x0)
+               count +=1
+               
+        if 'ret' in disasm_line:
+            regValue = None
+ 
+    print(f"a{reg}: found {str(count)} results" )    
+       
     
        
 def med17_main():
    
+
     auto_wait()
     fillGlobalRegs()
     auto_wait()
     
     directLinks()
+    
+    auto_wait()
+    
+    anotherDirectAddressingRoutine()
     auto_wait()
     
     #convert hex to offset in code with global registers
@@ -572,6 +626,7 @@ def med17_main():
             secondLayerLinks(reg, 'a'+str(i))
             auto_wait()
         
+    pointers()
     load_a2l()
     print('Finished!')
         
@@ -579,3 +634,5 @@ def med17_main():
 #load_a2l()
 #find_a9()
 med17_main()
+#pointers()
+#anotherDirectAddressingRoutine()    
