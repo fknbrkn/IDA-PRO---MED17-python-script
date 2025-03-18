@@ -6,6 +6,8 @@ Idapython
 
 <b>Howto:</b>  
   -load bin with start address, loading address = 0x80000000, choose tricore cpu  
+  -(optional if TC1793 used, choose TC1797 in list of cpus (?)) load additional binary file with these settings: ![TC1793_loading segments ida](https://github.com/user-attachments/assets/23f9d4b5-9f90-4449-85da-2943e3e4e354)
+  -(optional) check for the segments, add 0xC, 0xB, 0xA segments if needed
   -make autoanalyse of pflash segment to get raw code  
   -file -> script file  
   -choose a9 register from list of results. keep in mind that its usually flash (0x80000000 based) pointer
