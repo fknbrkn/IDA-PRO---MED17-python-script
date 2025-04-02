@@ -1,5 +1,5 @@
 #ida pro 7.4+ script to parse MED17 file
-#fknbrkn 2024
+#fknbrkn 2025
 
 
 #from cgi import test
@@ -301,7 +301,8 @@ def find_a9():
   x += ''.join('['+hex(i)+']\n' for i in results)
   print(results)
   if len(results) > 0: 
-    q = ida_kernwin.ask_text(10,str(hex(results[0])),x)
+    filtered = [x for x in results if (x & 0xFF000000) in (0x80000000, 0xA0000000)]
+    q = ida_kernwin.ask_text(10, str(hex(filtered[0])) if filtered else "0x0", x)
   else:
     q = ida_kernwin.ask_text(10,str(0x80123456),'Type a9 value here (usually its offset of a first element in stack of 0x800xxxxx) \n try to search for "debug16" text')   
   if not q: return None
@@ -322,38 +323,45 @@ def secondLayerLinks(reg, target_reg):
     print(f'Proceed with {reg} indirect offsets, target: [{target_reg}]')
     ofs = None
     count = 0
-    for line in idautils.Heads():
-      disasm_line = idc.GetDisasm(line)
-      #if line < 0x800EFF6E or line > 0x800EFF9C: continue #################################
-      if target_reg and ofs: 
-        #if target_reg had some offset
-        if '['+target_reg+']' in disasm_line:
-         #finally magic is here
-         ida_bytes.del_items(ofs)
-         if '16' in str(ida_ua.ua_mnem):
-          idc.create_data(ofs, idc.FF_WORD, 1, idc.BADADDR)
-         else:
-          idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
-         ida_offset.op_offset(line, 1, idc.REF_OFF32, -1, (ofs), 0x0)
-         count +=1
+    line_descr = ''
+    try:
+        for line in idautils.Heads():
+          disasm_line = idc.GetDisasm(line)
+          line_descr = str(hex(line)) + ' - ' + disasm_line
+          #if line < 0x800EFF6E or line > 0x800EFF9C: continue #################################
+          if target_reg and ofs: 
+            #if target_reg had some offset
+            if '['+target_reg+']' in disasm_line:
+             #finally magic is here
+             ida_bytes.del_items(ofs)
+             if '16' in str(ida_ua.ua_mnem):
+              idc.create_data(ofs, idc.FF_WORD, 1, idc.BADADDR)
+             else:
+              idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
+             ida_offset.op_offset(line, 1, idc.REF_OFF32, -1, (ofs), 0x0)
+             count +=1
          
-        #TODO!!!!
-        if target_reg+',' in disasm_line or 'ret' in disasm_line:
-            ofs = None
+            #TODO!!!!
+            if target_reg+',' in disasm_line or 'ret' in disasm_line:
+                ofs = None
 
-      if target_reg + ', ['+reg+'](' in disasm_line and ('ld32.a' in disasm_line ): #or 'lea' in disasm_line): 
-        #print(f'{disasm_line}')
-        ofs = getValueFromDisasmLine(disasm_line,'(')
-        
-        if not ofs: continue
-        #ida_bytes.del_items(ofs)
-        #idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
-        idc.create_data(int(ofs,16), idc.FF_DWORD, 4, idc.BADADDR)
-        idc.op_plain_offset(int(ofs,16), 0, 0) 
+          if target_reg + ', ['+reg+'](' in disasm_line and ('ld32.a' in disasm_line ): #or 'lea' in disasm_line): 
+            #print(f'{disasm_line}')
+            ofs = getValueFromDisasmLine(disasm_line,'(')
+            #print(f'ofs: {str(hex(ofs))}')
+            if not ofs: continue
+            ida_bytes.del_items(ofs)
+            #idc.create_data(ofs, idc.FF_DWORD, 1, idc.BADADDR)
+            idc.create_data(ofs, idc.FF_DWORD, 4, idc.BADADDR)
+            idc.op_plain_offset(ofs, 0, 0) 
 
-        if not '0x8' in str(hex(ofs)) and not '0xa' in str(hex(ofs)) and not '0xd' in str(hex(ofs)): continue
-        if len(str(hex(ofs))) != 10: continue
-        #if not target_reg: target_reg = print_operand(line,0)
+            if not '0x8' in str(hex(ofs)) and not '0xa' in str(hex(ofs)) and not '0xd' in str(hex(ofs)): continue
+            if len(str(hex(ofs))) != 10: continue
+            #if not target_reg: target_reg = print_operand(line,0)
+    except:
+       print(f'Error in secondLayerLinks(): ' + line_descr)
+       #raise BaseException
+            
     
     print(f'Done... {str(count)} entries replaced')
  
@@ -546,7 +554,7 @@ def load_a2l():
     
 def pointers():
     #ld32.a          a15, [a9](unk_8019E3BC - unk_8019E234)
-   
+  count = 0 
   for line in idautils.Heads():
     #if line < 0x8008403C or line > 0x80084050: continue #################################
     disasm_line = idc.GetDisasm(line)
@@ -556,6 +564,8 @@ def pointers():
             ofs = match.group(1)
             idc.create_data(int(ofs,16), idc.FF_DWORD, 4, idc.BADADDR)
             idc.op_plain_offset(int(ofs,16), 0, 0) 
+            count +=1
+  print(f"Found {str(count)} pointers")
             
 def anotherDirectAddressingRoutine():
    print("Searching for registers offsets, another method")
@@ -631,8 +641,5 @@ def med17_main():
     print('Finished!')
         
 
-#load_a2l()
-#find_a9()
 med17_main()
-#pointers()
-#anotherDirectAddressingRoutine()    
+    
