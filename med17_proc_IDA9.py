@@ -607,8 +607,6 @@ def anotherDirectAddressingRoutine():
        
 def med17_main():
    
-    load_a2l()
-    return
 
     auto_wait()
     fillGlobalRegs()
@@ -654,5 +652,6 @@ def med17_main():
         
 
 med17_main()
+
 
     
